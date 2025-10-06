@@ -41,7 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pri2025.pri2025study.ui.theme.Pri2025StudyTheme
 
-// ---- Activity (required by the manifest) ----
+// ---- Activity ----
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,18 +51,45 @@ class MainActivity : ComponentActivity() {
             Pri2025StudyTheme {
                 var loggedIn by remember { mutableStateOf(false) }
 
+                // 0 = Dashboard, 1 = Weekly Report
+                var screen by remember { mutableStateOf(0) }
+
+                // Shared Mon..Sun minutes (index 0 = Monday)
+                val weekMinutes = remember { mutableStateListOf(0, 0, 0, 0, 0, 0, 0) }
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    topBar = { CenterAlignedTopAppBar(title = { Text("StudyTime") }) }
+                    topBar = {
+                        CenterAlignedTopAppBar(
+                            title = { Text(if (screen == 0) "StudyTime" else "Weekly Report") },
+                            actions = {
+                                TextButton(onClick = { screen = 0 }) { Text("Dashboard") }
+                                TextButton(onClick = { screen = 1 }) { Text("Weekly") }
+                            }
+                        )
+                    }
                 ) { innerPadding ->
                     if (!loggedIn) {
                         Greeting(
                             name = "Android",
-                            onSignedIn = { loggedIn = true },   // ← flip to Dashboard
+                            onSignedIn = { loggedIn = true },
                             modifier = Modifier.padding(innerPadding)
                         )
                     } else {
-                        DashboardScreen()
+                        when (screen) {
+                            0 -> DashboardScreen(
+                                totalWeeklyMinutes = weekMinutes.sum(),
+                                onAddMinutes = { m ->
+                                    val i = currentDayIndexMon0()
+                                    weekMinutes[i] = weekMinutes[i] + m
+                                },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            1 -> WeeklyReportScreen(
+                                weekMinutes = weekMinutes,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
                     }
                 }
             }
@@ -70,11 +97,25 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ---- Your login/sign-in UI (kept as Greeting) ----
+// Map Calendar day to Mon=0..Sun=6
+private fun currentDayIndexMon0(): Int {
+    val c = java.util.Calendar.getInstance()
+    return when (c.get(java.util.Calendar.DAY_OF_WEEK)) {
+        java.util.Calendar.MONDAY -> 0
+        java.util.Calendar.TUESDAY -> 1
+        java.util.Calendar.WEDNESDAY -> 2
+        java.util.Calendar.THURSDAY -> 3
+        java.util.Calendar.FRIDAY -> 4
+        java.util.Calendar.SATURDAY -> 5
+        else -> 6 // Sunday
+    }
+}
+
+// ---- Login screen (kept as Greeting) ----
 @Composable
 fun Greeting(
     name: String,
-    onSignedIn: () -> Unit = {},                // ← added callback with default
+    onSignedIn: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var email by remember { mutableStateOf("") }
@@ -83,9 +124,7 @@ fun Greeting(
 
     fun submit() {
         showError = email.isBlank() || password.isBlank()
-        if (!showError) {
-            onSignedIn()                         // ← call to move to Dashboard
-        }
+        if (!showError) onSignedIn()
     }
 
     Column(
@@ -144,45 +183,60 @@ fun Greeting(
         ) { Text("Sign in") }
 
         TextButton(
-            onClick = { /* TODO: navigate to Sign Up later */ },
+            onClick = { /* TODO: Sign Up later */ },
             modifier = Modifier.align(Alignment.End)
         ) { Text("Create account") }
     }
 }
 
-// ---- Dashboard screen (weekly minutes + deadlines) ----
+// ---- Dashboard screen (uses shared weekly total + reports adds) ----
 @Composable
-fun DashboardScreen() {
+fun DashboardScreen(
+    totalWeeklyMinutes: Int,
+    onAddMinutes: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
     data class Deadline(val id: Long, val title: String, val dueText: String)
 
     val deadlines = remember { mutableStateListOf<Deadline>() }
     var showDeadlineDialog by remember { mutableStateOf(false) }
-
-    var weeklyMinutes by remember { mutableStateOf(0) }
     var addMinutesText by remember { mutableStateOf("") }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         Text("This Week", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
-        Text("Total studied: ${weeklyMinutes} minutes")
+        Text("Total studied: ${totalWeeklyMinutes} minutes")
 
+        // Pomodoro timer (30 min study / 10 min break)
+        Spacer(Modifier.height(16.dp))
+        PomodoroTimer(studyMinutes = 30, breakMinutes = 10)
+
+        Spacer(Modifier.height(24.dp))
+        Divider()
+        Spacer(Modifier.height(12.dp))
+
+        Text("Quick Add Minutes", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = addMinutesText,
-                onValueChange = { addMinutesText = it.filter { c -> c.isDigit() } },
+                onValueChange = { addMinutesText = it.filter { ch -> ch.isDigit() } },
                 label = { Text("Add minutes") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
             Button(onClick = {
                 val m = addMinutesText.toIntOrNull() ?: 0
-                if (m > 0) { weeklyMinutes += m; addMinutesText = "" }
+                if (m > 0) { onAddMinutes(m); addMinutesText = "" }
             }) { Text("Add") }
         }
 
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { weeklyMinutes += 30 }) { Text("+30 min quick add") }
+        Button(onClick = { onAddMinutes(30) }) { Text("+30 min quick add") }
 
         Spacer(Modifier.height(24.dp))
         Divider()
@@ -233,12 +287,52 @@ fun DashboardScreen() {
     }
 }
 
+// ---- Weekly report screen ----
+@Composable
+fun WeeklyReportScreen(
+    weekMinutes: List<Int>,
+    modifier: Modifier = Modifier
+) {
+    val labels = listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
+    val total = weekMinutes.sum()
+    val maxDay = (weekMinutes.maxOrNull() ?: 0).coerceAtLeast(1)
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text("Weekly Study Summary", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        Text("Total: ${total} minutes")
+
+        Spacer(Modifier.height(16.dp))
+        Divider()
+        Spacer(Modifier.height(12.dp))
+
+        for (i in 0..6) {
+            Text("${labels[i]} — ${weekMinutes[i]} min", style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(
+                progress = (weekMinutes[i].toFloat() / maxDay.toFloat()).coerceIn(0f, 1f),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Divider()
+        Spacer(Modifier.height(12.dp))
+        val avg = (total / 7.0).toInt()
+        Text("Daily average: ${avg} min/day", style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+// ---- 30/10 Pomodoro timer ----
 @Composable
 fun PomodoroTimer(
     studyMinutes: Int = 30,
     breakMinutes: Int = 10
 ) {
-    // phase & timer state
     var isRunning by remember { mutableStateOf(false) }
     var isStudyPhase by remember { mutableStateOf(true) }  // true = Study, false = Break
     val studySeconds = studyMinutes * 60
@@ -260,43 +354,24 @@ fun PomodoroTimer(
     val total = if (isStudyPhase) studySeconds else breakSeconds
     val progress = (total - remaining).toFloat() / total.toFloat()
 
-    // UI
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            if (isStudyPhase) "Study (30 min)" else "Break (10 min)",
-            style = MaterialTheme.typography.titleMedium
-        )
+        Text(if (isStudyPhase) "Study (30 min)" else "Break (10 min)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
 
-        // Time as MM:SS
         val mm = remaining / 60
         val ss = remaining % 60
         Text(String.format("%02d:%02d", mm, ss), style = MaterialTheme.typography.headlineLarge)
 
         Spacer(Modifier.height(8.dp))
-        LinearProgressIndicator(
-            progress = progress.coerceIn(0f, 1f),
-            modifier = Modifier.fillMaxWidth()
-        )
+        LinearProgressIndicator(progress = progress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())
 
         Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = { isRunning = true },
-                modifier = Modifier.weight(1f)
-            ) { Text("Start") }
-
-            OutlinedButton(
-                onClick = { isRunning = false },
-                modifier = Modifier.weight(1f)
-            ) { Text("Pause") }
-
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { isRunning = true }, modifier = Modifier.weight(1f)) { Text("Start") }
+            OutlinedButton(onClick = { isRunning = false }, modifier = Modifier.weight(1f)) { Text("Pause") }
             OutlinedButton(
                 onClick = {
                     isRunning = false
@@ -305,10 +380,8 @@ fun PomodoroTimer(
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("Reset") }
-
             OutlinedButton(
                 onClick = {
-                    // jump to next phase
                     isStudyPhase = !isStudyPhase
                     remaining = if (isStudyPhase) studySeconds else breakSeconds
                 },
@@ -317,5 +390,3 @@ fun PomodoroTimer(
         }
     }
 }
-
-
