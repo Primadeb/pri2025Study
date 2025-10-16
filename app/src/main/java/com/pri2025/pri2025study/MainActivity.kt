@@ -39,9 +39,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.pri2025.pri2025study.ui.theme.Pri2025StudyTheme
+import kotlinx.coroutines.delay
+import java.util.Calendar
 
-// ---- Activity ----
+//  MAIN ACTIVITY
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,75 +56,93 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             Pri2025StudyTheme {
-                var loggedIn by remember { mutableStateOf(false) }
-
-                // 0 = Dashboard, 1 = Weekly Report
-                var screen by remember { mutableStateOf(0) }
-
-                // Shared Mon..Sun minutes (index 0 = Monday)
-                val weekMinutes = remember { mutableStateListOf(0, 0, 0, 0, 0, 0, 0) }
-
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = { Text(if (screen == 0) "StudyTime" else "Weekly Report") },
-                            actions = {
-                                TextButton(onClick = { screen = 0 }) { Text("Dashboard") }
-                                TextButton(onClick = { screen = 1 }) { Text("Weekly") }
-                            }
-                        )
-                    }
-                ) { innerPadding ->
-                    if (!loggedIn) {
-                        Greeting(
-                            name = "Android",
-                            onSignedIn = { loggedIn = true },
-                            modifier = Modifier.padding(innerPadding)
-                        )
-                    } else {
-                        when (screen) {
-                            0 -> DashboardScreen(
-                                totalWeeklyMinutes = weekMinutes.sum(),
-                                onAddMinutes = { m ->
-                                    val i = currentDayIndexMon0()
-                                    weekMinutes[i] = weekMinutes[i] + m
-                                },
-                                modifier = Modifier.padding(innerPadding)
-                            )
-                            1 -> WeeklyReportScreen(
-                                weekMinutes = weekMinutes,
-                                modifier = Modifier.padding(innerPadding)
-                            )
-                        }
-                    }
-                }
+                AppNavigation()
             }
         }
     }
 }
 
+
+
+//  NAVIGATION SETUP
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppNavigation() {
+    val navController = rememberNavController()
+    var loggedIn by remember { mutableStateOf(false) }
+
+    // Shared app data
+    val weekMinutes = remember { mutableStateListOf(0, 0, 0, 0, 0, 0, 0) }
+    val deadlines = remember { mutableStateListOf<Deadline>() }
+
+    Scaffold(
+        topBar = {
+            if (loggedIn) {
+                CenterAlignedTopAppBar(
+                    title = { Text("StudyTime") },
+                    actions = {
+                        TextButton(onClick = { navController.navigate("dashboard") }) { Text("Dashboard") }
+                        TextButton(onClick = { navController.navigate("weekly") }) { Text("Weekly") }
+                        TextButton(onClick = { navController.navigate("addDeadline") }) { Text("Deadlines") }
+                    }
+                )
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = if (loggedIn) "dashboard" else "login",
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable("login") {
+                Greeting(onSignedIn = { loggedIn = true; navController.navigate("dashboard") {
+                    popUpTo("login"){inclusive = true}
+                } })
+            }
+            composable("dashboard") {
+                DashboardScreen(
+                    totalWeeklyMinutes = weekMinutes.sum(),
+                    onAddMinutes = { m ->
+                        val i = currentDayIndexMon0()
+                        weekMinutes[i] = weekMinutes[i] + m
+                    },
+                    onAddDeadlineClick = { navController.navigate("addDeadline") }
+                )
+            }
+            composable("weekly") {
+                WeeklyReportScreen(weekMinutes = weekMinutes)
+            }
+            composable("addDeadline") {
+                AddDeadlineScreen(deadlines = deadlines)
+            }
+        }
+    }
+}
+
+// helper to detect current route
+@Composable
+fun currentRoute(navController: NavHostController): String? {
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    return navBackStackEntry?.destination?.route
+}
+
 // Map Calendar day to Mon=0..Sun=6
-private fun currentDayIndexMon0(): Int {
-    val c = java.util.Calendar.getInstance()
-    return when (c.get(java.util.Calendar.DAY_OF_WEEK)) {
-        java.util.Calendar.MONDAY -> 0
-        java.util.Calendar.TUESDAY -> 1
-        java.util.Calendar.WEDNESDAY -> 2
-        java.util.Calendar.THURSDAY -> 3
-        java.util.Calendar.FRIDAY -> 4
-        java.util.Calendar.SATURDAY -> 5
+fun currentDayIndexMon0(): Int {
+    val c = Calendar.getInstance()
+    return when (c.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.MONDAY -> 0
+        Calendar.TUESDAY -> 1
+        Calendar.WEDNESDAY -> 2
+        Calendar.THURSDAY -> 3
+        Calendar.FRIDAY -> 4
+        Calendar.SATURDAY -> 5
         else -> 6 // Sunday
     }
 }
 
-// ---- Login screen (kept as Greeting) ----
+// LOGIN SCREEN
 @Composable
-fun Greeting(
-    name: String,
-    onSignedIn: () -> Unit = {},
-    modifier: Modifier = Modifier
-) {
+fun Greeting(onSignedIn: () -> Unit = {}) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showError by remember { mutableStateOf(false) }
@@ -128,7 +153,7 @@ fun Greeting(
     }
 
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(20.dp),
         verticalArrangement = Arrangement.Center,
@@ -174,44 +199,29 @@ fun Greeting(
         }
 
         Spacer(Modifier.height(16.dp))
-
         Button(
             onClick = { submit() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
+            modifier = Modifier.fillMaxWidth().height(48.dp)
         ) { Text("Sign in") }
-
-        TextButton(
-            onClick = { /* TODO: Sign Up later */ },
-            modifier = Modifier.align(Alignment.End)
-        ) { Text("Create account") }
     }
 }
 
-// ---- Dashboard screen (uses shared weekly total + reports adds) ----
+//  DASHBOARD SCREEN
 @Composable
 fun DashboardScreen(
     totalWeeklyMinutes: Int,
     onAddMinutes: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    onAddDeadlineClick: () -> Unit
 ) {
-    data class Deadline(val id: Long, val title: String, val dueText: String)
-
-    val deadlines = remember { mutableStateListOf<Deadline>() }
-    var showDeadlineDialog by remember { mutableStateOf(false) }
     var addMinutesText by remember { mutableStateOf("") }
 
     Column(
-        modifier
-            .fillMaxSize()
-            .padding(16.dp)
+        Modifier.fillMaxSize().padding(16.dp)
     ) {
         Text("This Week", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text("Total studied: ${totalWeeklyMinutes} minutes")
 
-        // Pomodoro timer (30 min study / 10 min break)
         Spacer(Modifier.height(16.dp))
         PomodoroTimer(studyMinutes = 30, breakMinutes = 10)
 
@@ -241,66 +251,21 @@ fun DashboardScreen(
         Spacer(Modifier.height(24.dp))
         Divider()
         Spacer(Modifier.height(12.dp))
-
         Text("Upcoming Deadlines", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-        Button(onClick = { showDeadlineDialog = true }) { Text("Add deadline") }
-        Spacer(Modifier.height(12.dp))
-
-        if (deadlines.isEmpty()) {
-            Text("No deadlines yet.")
-        } else {
-            deadlines.forEach { d ->
-                ElevatedCard(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(d.title, style = MaterialTheme.typography.titleSmall)
-                        Text("Due: ${d.dueText}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-    }
-
-    if (showDeadlineDialog) {
-        var title by remember { mutableStateOf("") }
-        var due by remember { mutableStateOf("YYYY-MM-DD") }
-
-        AlertDialog(
-            onDismissRequest = { showDeadlineDialog = false },
-            title = { Text("Add deadline") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true)
-                    OutlinedTextField(value = due, onValueChange = { due = it }, label = { Text("Due date (text)") }, singleLine = true)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val safeTitle = if (title.isBlank()) "Untitled" else title
-                    val safeDue = if (due.isBlank()) "TBD" else due
-                    deadlines += Deadline(System.currentTimeMillis(), safeTitle, safeDue)
-                    showDeadlineDialog = false
-                }) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showDeadlineDialog = false }) { Text("Cancel") } }
-        )
+        Button(onClick = { onAddDeadlineClick() }) { Text("Add or View Deadlines") }
     }
 }
 
-// ---- Weekly report screen ----
+// weekly report screen
 @Composable
-fun WeeklyReportScreen(
-    weekMinutes: List<Int>,
-    modifier: Modifier = Modifier
-) {
+fun WeeklyReportScreen(weekMinutes: List<Int>) {
     val labels = listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
     val total = weekMinutes.sum()
     val maxDay = (weekMinutes.maxOrNull() ?: 0).coerceAtLeast(1)
 
     Column(
-        modifier
-            .fillMaxSize()
-            .padding(16.dp)
+        Modifier.fillMaxSize().padding(16.dp)
     ) {
         Text("Weekly Study Summary", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
@@ -327,25 +292,84 @@ fun WeeklyReportScreen(
     }
 }
 
-// ---- 30/10 Pomodoro timer ----
+// deadline data and screen
+data class Deadline(val id: Long, val title: String, val dueText: String)
+
+@Composable
+fun AddDeadlineScreen(deadlines: MutableList<Deadline>) {
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxSize().padding(16.dp)
+    ) {
+        Text("All Deadlines", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+
+        Button(onClick = { showAddDialog = true }) { Text("Add New Deadline") }
+
+        Spacer(Modifier.height(12.dp))
+        Divider()
+        Spacer(Modifier.height(12.dp))
+
+        if (deadlines.isEmpty()) {
+            Text("No deadlines yet.")
+        } else {
+            deadlines.forEach { d ->
+                ElevatedCard(
+                    Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(d.title, style = MaterialTheme.typography.titleSmall)
+                        Text("Due: ${d.dueText}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        var title by remember { mutableStateOf("") }
+        var due by remember { mutableStateOf("YYYY-MM-DD") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text("Add Deadline") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
+                    OutlinedTextField(value = due, onValueChange = { due = it }, label = { Text("Due date") })
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val safeTitle = if (title.isBlank()) "Untitled" else title
+                    val safeDue = if (due.isBlank()) "TBD" else due
+                    deadlines += Deadline(System.currentTimeMillis(), safeTitle, safeDue)
+                    showAddDialog = false
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+//  POMODORO TIMER
 @Composable
 fun PomodoroTimer(
     studyMinutes: Int = 30,
     breakMinutes: Int = 10
 ) {
     var isRunning by remember { mutableStateOf(false) }
-    var isStudyPhase by remember { mutableStateOf(true) }  // true = Study, false = Break
+    var isStudyPhase by remember { mutableStateOf(true) }
     val studySeconds = studyMinutes * 60
     val breakSeconds = breakMinutes * 60
     var remaining by remember { mutableStateOf(studySeconds) }
 
-    // tick every second while running
     LaunchedEffect(isRunning, isStudyPhase, remaining) {
         if (isRunning && remaining > 0) {
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
             remaining -= 1
         } else if (isRunning && remaining == 0) {
-            // phase finished → auto-switch
             isStudyPhase = !isStudyPhase
             remaining = if (isStudyPhase) studySeconds else breakSeconds
         }
@@ -360,7 +384,6 @@ fun PomodoroTimer(
     ) {
         Text(if (isStudyPhase) "Study (30 min)" else "Break (10 min)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-
         val mm = remaining / 60
         val ss = remaining % 60
         Text(String.format("%02d:%02d", mm, ss), style = MaterialTheme.typography.headlineLarge)
