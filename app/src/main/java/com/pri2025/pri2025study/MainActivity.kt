@@ -62,7 +62,6 @@ import androidx.compose.foundation.clickable
 
 
 
-
 //  MAIN ACTIVITY
 class MainActivity : ComponentActivity() {
 
